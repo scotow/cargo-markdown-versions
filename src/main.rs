@@ -1,18 +1,19 @@
-mod options;
 mod configuration;
+mod options;
 
-use std::{env, fs};
-use std::path::{Path};
+use std::{env, fs, path::Path, str};
+
 use anyhow::{anyhow, Error as AnyError};
 use cargo_metadata::{Metadata, MetadataCommand, Package};
 use clap::Parser;
-use git2::{Repository};
-use crate::configuration::{Configuration, VersionsGatherer};
-use crate::options::Options;
-use std::str;
+use git2::Repository;
 use serde::{Deserialize, Deserializer};
-use time::format_description::well_known::Rfc3339;
-use time::OffsetDateTime;
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
+
+use crate::{
+    configuration::{Configuration, VersionsGatherer},
+    options::Options,
+};
 
 fn main() -> Result<(), AnyError> {
     let options = Options::parse();
@@ -24,43 +25,62 @@ fn main() -> Result<(), AnyError> {
     }
     let metadata = metadata_command.exec()?;
 
-    let package = select_package(&metadata, options.package.as_deref(), options.manifest_path.as_deref())?.ok_or_else(|| anyhow!("failed to resolve package"))?;
+    let package = select_package(
+        &metadata,
+        options.package.as_deref(),
+        options.manifest_path.as_deref(),
+    )?
+    .ok_or_else(|| anyhow!("failed to resolve package"))?;
     let configuration = match package.metadata.pointer("/markdown-versions") {
-        Some(value) => {
-            serde_json::from_value::<Configuration>(value.clone())?
-        },
+        Some(value) => serde_json::from_value::<Configuration>(value.clone())?,
         None => {
             if options.default_configuration {
                 Configuration::default()
             } else {
-                return Err(anyhow!("missing `package.metadata.markdown-versions` field"))
+                return Err(anyhow!(
+                    "missing `package.metadata.markdown-versions` field"
+                ));
             }
         }
     };
 
     let versions = match &configuration.versions_gatherer {
         VersionsGatherer::Registry { api_base_url } => {
-            ureq::get(&format!("{}/crates/{}/versions", api_base_url.trim_end_matches('/'), package.name))
-                .call()?
-                .into_json::<ApiResponse>()?
-                .versions
-        },
+            ureq::get(&format!(
+                "{}/crates/{}/versions",
+                api_base_url.trim_end_matches('/'),
+                package.name
+            ))
+            .call()?
+            .into_json::<ApiResponse>()?
+            .versions
+        }
         VersionsGatherer::Git { .. } => {
-            let regex = configuration.versions_gatherer.unwrap_git_tags_pattern(&package.name)?;
+            let regex = configuration
+                .versions_gatherer
+                .unwrap_git_tags_pattern(&package.name)?;
             let repo = Repository::open(&metadata.workspace_root)?;
             let mut tags = Vec::new();
             repo.tag_foreach(|id, name| {
                 if let Ok(name) = str::from_utf8(name) {
-                    if let Some(version) = regex.captures(name.trim_start_matches("refs/tags/")).and_then(|captures| captures.get(1).map(|m| m.as_str().to_owned())) {
+                    if let Some(version) = regex
+                        .captures(name.trim_start_matches("refs/tags/"))
+                        .and_then(|captures| captures.get(1).map(|m| m.as_str().to_owned()))
+                    {
                         let commit = match repo.find_commit(id) {
                             Ok(commit) => commit,
-                            Err(_) => {
-                                repo.find_tag(id).unwrap().peel().unwrap().into_commit().unwrap()
-                            }
+                            Err(_) => repo
+                                .find_tag(id)
+                                .unwrap()
+                                .peel()
+                                .unwrap()
+                                .into_commit()
+                                .unwrap(),
                         };
                         tags.push(CrateVersion {
                             version,
-                            creation: OffsetDateTime::from_unix_timestamp(commit.time().seconds()).unwrap(),
+                            creation: OffsetDateTime::from_unix_timestamp(commit.time().seconds())
+                                .unwrap(),
                         });
                     }
                 }
@@ -76,13 +96,22 @@ fn main() -> Result<(), AnyError> {
             let mut readme = fs::read_to_string(readme_path)?.trim_end().to_owned();
             readme.push_str("\n\n");
             readme
-        },
+        }
         _ => String::new(),
     };
 
-    readme.push_str(&format!("{} {}\n\n", "#".repeat(configuration.title.size), configuration.title.label));
+    readme.push_str(&format!(
+        "{} {}\n\n",
+        "#".repeat(configuration.title.size),
+        configuration.title.label
+    ));
     for CrateVersion { version, creation } in versions {
-        readme.push_str(&format!("- [{} - {}]({})\n", version, creation.date() ,apply_patter(&configuration.doc_pattern, &package.name, &version)));
+        readme.push_str(&format!(
+            "- [{} - {}]({})\n",
+            version,
+            creation.date(),
+            apply_patter(&configuration.doc_pattern, &package.name, &version)
+        ));
     }
 
     print!("{readme}");
@@ -90,7 +119,11 @@ fn main() -> Result<(), AnyError> {
     Ok(())
 }
 
-fn select_package<'a>(metadata: &'a Metadata, package: Option<&str>, manifest_path: Option<&Path>) -> Result<Option<&'a Package>, AnyError> {
+fn select_package<'a>(
+    metadata: &'a Metadata,
+    package: Option<&str>,
+    manifest_path: Option<&Path>,
+) -> Result<Option<&'a Package>, AnyError> {
     if let Some(package) = package {
         return Ok(metadata.packages.iter().find(|pkg| pkg.name == package));
     }
@@ -101,17 +134,19 @@ fn select_package<'a>(metadata: &'a Metadata, package: Option<&str>, manifest_pa
         _ => {
             let manifest_path = match manifest_path {
                 Some(path) => path.to_owned(),
-                None => {
-                    env::current_dir()?.join("Cargo.toml")
-                }
+                None => env::current_dir()?.join("Cargo.toml"),
             };
-            Ok(metadata.packages.iter().find(|pkg| pkg.manifest_path == manifest_path))
+            Ok(metadata
+                .packages
+                .iter()
+                .find(|pkg| pkg.manifest_path == manifest_path))
         }
     }
 }
 
 fn apply_patter(doc_pattern: &str, crate_name: &str, version: &str) -> String {
-    doc_pattern.replace("{crate}", crate_name)
+    doc_pattern
+        .replace("{crate}", crate_name)
         .replace("{crate_underscore}", &crate_name.replace('-', "_"))
         .replace("{version}", version)
 }
@@ -125,12 +160,18 @@ struct ApiResponse {
 struct CrateVersion {
     #[serde(rename = "num")]
     version: String,
-    #[serde(rename = "created_at", deserialize_with = "CrateVersion::deserialize_datetime")]
+    #[serde(
+        rename = "created_at",
+        deserialize_with = "CrateVersion::deserialize_datetime"
+    )]
     creation: OffsetDateTime,
 }
 
 impl CrateVersion {
-    fn deserialize_datetime<'de, D>(deserializer: D) -> Result<OffsetDateTime, D::Error> where D: Deserializer<'de> {
+    fn deserialize_datetime<'de, D>(deserializer: D) -> Result<OffsetDateTime, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
         Ok(OffsetDateTime::parse(&String::deserialize(deserializer)?, &Rfc3339).unwrap())
     }
 }

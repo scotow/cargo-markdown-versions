@@ -1,6 +1,6 @@
-use serde::Deserialize;
-use regex::Regex;
 use anyhow::{anyhow, Error as AnyError};
+use regex::Regex;
+use serde::Deserialize;
 
 const SEMVER_REGEX: &str = r#"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?"#;
 
@@ -71,14 +71,17 @@ impl Default for TitleConfiguration {
 pub enum VersionsGatherer {
     #[serde(rename_all = "kebab-case")]
     Registry {
-        #[serde(alias = "api", default = "VersionsGatherer::default_registry_api_base_url")]
+        #[serde(
+            alias = "api",
+            default = "VersionsGatherer::default_registry_api_base_url"
+        )]
         api_base_url: String,
     },
     #[serde(rename_all = "kebab-case")]
     Git {
         #[serde(alias = "tags")]
         tags_pattern: Option<String>,
-    }
+    },
 }
 
 impl VersionsGatherer {
@@ -91,16 +94,18 @@ impl VersionsGatherer {
             VersionsGatherer::Registry { .. } => Err(anyhow!("unexpected registry gatherer")),
             VersionsGatherer::Git { tags_pattern: None } => {
                 Ok(Regex::new(&format!(r#"^{package}-v({SEMVER_REGEX})$"#))?)
-            },
-            VersionsGatherer::Git { tags_pattern: Some(regex) } => {
-                Ok(Regex::new(&format!(r#"^{regex}$"#))?)
             }
+            VersionsGatherer::Git {
+                tags_pattern: Some(regex),
+            } => Ok(Regex::new(&format!(r#"^{regex}$"#))?),
         }
     }
 }
 
 impl Default for VersionsGatherer {
     fn default() -> Self {
-        Self::Registry { api_base_url: Self::default_registry_api_base_url() }
+        Self::Registry {
+            api_base_url: Self::default_registry_api_base_url(),
+        }
     }
 }
