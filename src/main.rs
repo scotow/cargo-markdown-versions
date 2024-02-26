@@ -6,12 +6,11 @@ use std::path::{Path};
 use anyhow::{anyhow, Error as AnyError};
 use cargo_metadata::{Metadata, MetadataCommand, Package};
 use clap::Parser;
-use git2::{Commit, Error, Repository, RepositoryOpenFlags};
+use git2::{Repository};
 use crate::configuration::{Configuration, VersionsGatherer};
 use crate::options::Options;
 use std::str;
 use serde::{Deserialize, Deserializer};
-use serde_json::Value;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
@@ -132,6 +131,6 @@ struct CrateVersion {
 
 impl CrateVersion {
     fn deserialize_datetime<'de, D>(deserializer: D) -> Result<OffsetDateTime, D::Error> where D: Deserializer<'de> {
-        Ok(OffsetDateTime::parse("1985-04-12T23:20:50.52Z", &Rfc3339).unwrap())
+        Ok(OffsetDateTime::parse(&String::deserialize(deserializer)?, &Rfc3339).unwrap())
     }
 }
